@@ -1,0 +1,31 @@
+name: run
+on:
+  workflow_dispatch:
+    inputs:
+      label:
+        description: task label
+        required: false
+        default: task
+      script_b64:
+        description: base64 of bash script
+        required: true
+jobs:
+  run:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - name: run
+        run: |
+          mkdir -p out
+          sw_vers | tee out/00.txt
+          uname -a | tee -a out/00.txt
+          echo "${{ inputs.script_b64 }}" | base64 -d > /tmp/task.sh
+          chmod +x /tmp/task.sh
+          bash /tmp/task.sh > out/01.txt 2>&1 || echo "rc=$?" >> out/01.txt
+          tail -100 out/01.txt
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: out
+          path: out/
