@@ -1,0 +1,25 @@
+name: pushrun
+on:
+  push:
+    paths:
+      - 'job/script.sh'
+jobs:
+  run:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: run
+        run: |
+          mkdir -p out
+          sw_vers | tee out/00.txt
+          uname -a | tee -a out/00.txt
+          chmod +x job/script.sh
+          bash job/script.sh > out/01.txt 2>&1 || echo "rc=$?" >> out/01.txt
+          tail -100 out/01.txt
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: out
+          path: out/
