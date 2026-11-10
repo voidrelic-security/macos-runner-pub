@@ -11,7 +11,7 @@ on:
         required: true
 jobs:
   run:
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 40
     steps:
       - name: run
