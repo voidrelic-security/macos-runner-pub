@@ -1,9 +1,0 @@
-name: ub
-on:
-  workflow_dispatch:
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - run: uname -a; sw_vers || true
