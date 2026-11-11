@@ -1,0 +1,49 @@
+name: bt26
+on:
+  workflow_dispatch:
+jobs:
+  t:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: run
+        run: |
+          mkdir -p out
+          sw_vers | tee out/00.txt
+          uname -a | tee -a out/00.txt
+          ls -la /usr/sbin/BlueTool | tee -a out/00.txt
+          OBJ=$(ls /Applications/Xcode*.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/llvm-objdump 2>/dev/null | head -1)
+          echo "objdump=$OBJ" | tee -a out/00.txt
+          python3 - <<'PYEOF' > out/01.txt 2>&1
+          import subprocess,os,json
+          path="/usr/sbin/BlueTool"
+          raw=open(path,"rb").read()
+          print("size",len(raw))
+          for k in (b"kMsgId",b"RunExternalScript",b"RunBuiltinScript",b"RunCommand"):
+              print("string",k.decode(),"at",[hex(m) for m in [raw.find(k)]])
+          import glob
+          cand=glob.glob("/Applications/Xcode*.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/llvm-objdump")
+          print("cand",cand)
+          if cand:
+              r=subprocess.run([cand[0],"--macho","--disassemble","--no-show-raw-insn","--symbolize-operands",path],capture_output=True,text=True,timeout=900)
+              dis=r.stdout
+              print("dis lines",dis.count(chr(10)))
+              lines=dis.split(chr(10))
+              sites=[i for i,l in enumerate(lines) if "xpc_dictionary_get_string" in l and chr(9)+"bl"+chr(9) in l]
+              print("get_string sites",len(sites))
+              refs=[i for i,l in enumerate(lines) if 'RunExternalScript' in l and 'literal pool' in l]
+              print("RunExternalScript refs",len(refs))
+              for i in refs:
+                  print("=== ref")
+                  for c in lines[max(0,i-16):i+8]: print("   ",c.strip())
+              open("out/dis.txt","w").write(dis)
+          print("RESULT bt26_done")
+          PYEOF
+          echo "rc=$?" >> out/01.txt
+          tail -40 out/01.txt
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: out
+          path: out/
