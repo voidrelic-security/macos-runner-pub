@@ -1,0 +1,28 @@
+name: csh
+on:
+  workflow_dispatch:
+jobs:
+  t:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - name: run
+        run: |
+          mkdir -p out
+          sw_vers | tee out/00.txt
+          id | tee -a out/00.txt
+          ls -la /usr/libexec/corestoragehelperd | tee -a out/00.txt
+          cat /System/Library/LaunchDaemons/com.apple.corestorage.corestoragehelperd.plist | head -40 | tee -a out/00.txt
+          plutil -p /System/Library/LaunchDaemons/com.apple.corestorage.corestoragehelperd.plist | tee -a out/00.txt
+          OBJ=/Applications/Xcode_26.0.1.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/llvm-objdump
+          $OBJ --macho --disassemble --no-show-raw-insn --symbolize-operands /usr/libexec/corestoragehelperd > out/dis.txt 2>&1
+          wc -l out/dis.txt | tee -a out/00.txt
+          grep -n 'literal pool for' out/dis.txt | grep -iE 'op|AddUser|Reset|Synchron|status|path|auth|user|pass' | head -60 | tee out/keys.txt
+          echo "--- imports ---" | tee -a out/00.txt
+          $OBJ --macho --syms /usr/libexec/corestoragehelperd 2>/dev/null | grep UNDF | head -80 | tee out/imports.txt
+      - name: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: out
+          path: out/
