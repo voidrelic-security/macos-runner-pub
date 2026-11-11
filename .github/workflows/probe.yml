@@ -1,9 +1,0 @@
-name: probe
-on:
-  workflow_dispatch:
-jobs:
-  a:
-    runs-on: macos-15
-    timeout-minutes: 8
-    steps:
-      - run: sw_vers; ls -la /usr/sbin/BlueTool
