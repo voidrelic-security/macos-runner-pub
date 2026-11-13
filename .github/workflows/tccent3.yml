@@ -1,0 +1,62 @@
+name: tccent3
+on:
+  push:
+    paths:
+      - '.github/workflows/tccent3.yml'
+  workflow_dispatch:
+jobs:
+  tccent3:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - name: os version
+        run: sw_vers
+
+      - name: dump full entitlements of key binaries
+        run: |
+          set +e
+          mkdir -p out
+          for f in /usr/sbin/screencapture \
+                   /usr/libexec/authopen \
+                   "/System/Library/CoreServices/System Events.app/Contents/MacOS/System Events" \
+                   "/System/Library/CoreServices/AppleScript Utility.app/Contents/MacOS/AppleScript Utility" \
+                   "/System/Library/PrivateFrameworks/PackageKit.framework/Versions/A/Resources/installd" ; do
+            [ -f "$f" ] || continue
+            n=$(basename "$f" | tr ' ' '_')
+            {
+              echo "=== $f ==="
+              ls -la "$f"
+              echo "--- perms / owner ---"
+              stat -f '%Sp %Su:%Sg' "$f"
+              echo "--- entitlements ---"
+              codesign -d --entitlements - "$f" 2>&1
+              echo "--- signing info ---"
+              codesign -dv "$f" 2>&1 | head -8
+              echo
+            } > "out/$n.txt" 2>&1
+          done
+          ls -la out/
+          echo "=== screencapture entitlements ==="
+          cat "out/screencapture.txt" 2>/dev/null | head -60
+
+      - name: check responsible-process API on screencapture
+        run: |
+          set +e
+          {
+            echo "=== does screencapture link responsibility APIs? ==="
+            nm -u /usr/sbin/screencapture 2>/dev/null | grep -iE 'responsib|tcc' 
+            echo
+            echo "=== otool -L ==="
+            otool -L /usr/sbin/screencapture 2>/dev/null | head -20
+            echo
+            echo "=== strings mentioning tcc/responsible ==="
+            strings -a /usr/sbin/screencapture 2>/dev/null | grep -iE 'tcc|responsib' | head -20
+          } > out/sc_api.txt 2>&1
+          cat out/sc_api.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tccent3
+          path: out
+          if-no-files-found: warn
