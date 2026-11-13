@@ -1,0 +1,77 @@
+name: csh27
+on:
+  push:
+    paths:
+      - '.github/workflows/csh27.yml'
+  workflow_dispatch:
+jobs:
+  csh27:
+    runs-on: macos-27
+    timeout-minutes: 20
+    steps:
+      - name: os version
+        run: |
+          sw_vers
+          echo "---"
+          uname -m
+
+      - name: locate corestoragehelperd
+        run: |
+          set +e
+          mkdir -p out
+          for p in /usr/libexec/corestoragehelperd \
+                   /System/Library/PrivateFrameworks/CoreStorage.framework/Support/corestoragehelperd \
+                   /usr/sbin/corestoragehelperd ; do
+            if [ -f "$p" ]; then
+              echo "FOUND: $p"
+              cp "$p" out/corestoragehelperd
+              ls -la out/
+              file out/corestoragehelperd
+            fi
+          done
+          # 兜底：全盘找（限深度，避免超时）
+          if [ ! -f out/corestoragehelperd ]; then
+            echo "fallback search..."
+            find /usr/libexec /usr/sbin /System/Library -maxdepth 6 -name 'corestoragehelperd' 2>/dev/null | head -5 | while read f; do
+              echo "FOUND2: $f"; cp "$f" out/corestoragehelperd; done
+          fi
+          ls -la out/ || true
+
+      - name: dump plist
+        run: |
+          set +e
+          P=/System/Library/LaunchDaemons/com.apple.corestorage.corestoragehelperd.plist
+          if [ -f "$P" ]; then
+            cp "$P" out/ 2>/dev/null
+            echo "=== plist ==="
+            plutil -p "$P" 2>/dev/null || cat "$P"
+          else
+            echo "plist not found at $P"
+            find /System/Library/LaunchDaemons -name '*corestorage*' 2>/dev/null | head
+          fi
+
+      - name: disassemble AddUser dispatch
+        run: |
+          set +e
+          B=out/corestoragehelperd
+          [ -f "$B" ] || { echo "no binary"; exit 0; }
+          # 提取 arm64 或 x86_64 slice
+          lipo -info "$B" 2>/dev/null || true
+          ARCH=$(lipo -archs "$B" 2>/dev/null | awk '{print $1}')
+          echo "arch=$ARCH"
+          # 反汇编到文件（otool 输出很大，先存）
+          otool -tvV "$B" > out/dis_full.txt 2>&1
+          wc -l out/dis_full.txt
+          echo "=== strings of interest ==="
+          strings -a "$B" | grep -iE 'AddUser|ResetPassword|SynchronizeUsers|CSFDE|authref|authuser|authpass' | sort -u | head -40
+          echo "=== identity primitives (should be 0 if bug persists) ==="
+          for s in audit_token_to_au32 xpc_connection_get_euid xpc_connection_get_pid SecTaskCreateWithAuditToken SecTaskCopyValueForEntitlement geteuid getuid csops proc_pidinfo; do
+            printf "%-34s %s\n" "$s" "$(strings -a "$B" | grep -c "$s")"
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: csh27
+          path: out
+          if-no-files-found: warn
