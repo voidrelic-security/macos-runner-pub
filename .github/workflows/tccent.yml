@@ -1,0 +1,75 @@
+name: tccent
+on:
+  push:
+    paths:
+      - '.github/workflows/tccent.yml'
+  workflow_dispatch:
+jobs:
+  tccent:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: os version
+        run: sw_vers
+
+      - name: scan entitlements across system binaries
+        run: |
+          set +e
+          mkdir -p out
+          OUT=out/entitlement_hits.txt
+          : > $OUT
+
+          # 目标 entitlement（TCC 继承相关）
+          PAT='check-allow-on-responsible-process|tcc\.manager\.set-responsible|com\.apple\.private\.tcc'
+
+          echo "=== scanning /usr/libexec /usr/sbin /usr/bin /System/Library/CoreServices /System/Library/PrivateFrameworks ==="
+          for d in /usr/libexec /usr/sbin /usr/bin /System/Library/CoreServices /System/Library/PrivateFrameworks /System/Library/Frameworks; do
+            [ -d "$d" ] || continue
+            find "$d" -type f -perm -111 -size -20M 2>/dev/null | head -4000 | while read f; do
+              # codesign -d --entitlements 输出 XML；只在命中时才写
+              E=$(codesign -d --entitlements - "$f" 2>/dev/null)
+              [ -z "$E" ] && continue
+              if echo "$E" | grep -qE "$PAT"; then
+                echo "### $f" >> $OUT
+                echo "$E" | grep -oE '<key>[^<]+</key>' | sed 's/<[^>]*>//g' | grep -E "$PAT" | sort -u | sed 's/^/    /' >> $OUT
+              fi
+            done
+          done
+          echo "=== hits ==="
+          cat $OUT
+          wc -l $OUT
+
+      - name: list tccd-related daemons
+        run: |
+          set +e
+          {
+            echo "=== binaries whose NAME matches tcc ==="
+            find /usr/libexec /usr/sbin /System/Library -maxdepth 6 -iname '*tcc*' -type f 2>/dev/null | head -40
+            echo
+            echo "=== launchd jobs with tcc in name ==="
+            ls /System/Library/LaunchDaemons/ 2>/dev/null | grep -i tcc
+            echo
+            echo "=== TCC.db locations ==="
+            ls -la "/Library/Application Support/com.apple.TCC/" 2>/dev/null
+            ls -la ~/Library/Application\ Support/com.apple.TCC/ 2>/dev/null
+          } > out/tccd_inventory.txt 2>&1
+          cat out/tccd_inventory.txt
+
+      - name: dump tccd entitlements fully
+        run: |
+          set +e
+          for f in /System/Library/PrivateFrameworks/TCC.framework/Support/tccd \
+                   /usr/libexec/tccd ; do
+            [ -f "$f" ] || continue
+            echo "=== $f ===" >> out/tccd_full.txt
+            codesign -d --entitlements - "$f" >> out/tccd_full.txt 2>&1
+            echo >> out/tccd_full.txt
+          done
+          cat out/tccd_full.txt 2>/dev/null | head -80
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tccent
+          path: out
+          if-no-files-found: warn
