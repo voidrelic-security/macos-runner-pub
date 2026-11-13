@@ -1,0 +1,68 @@
+name: sbpl
+on:
+  push:
+    paths:
+      - '.github/workflows/sbpl.yml'
+  workflow_dispatch:
+jobs:
+  sbpl:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - name: os version
+        run: sw_vers
+
+      - name: locate libsandbox and sandbox profiles
+        run: |
+          set +e
+          mkdir -p out
+          echo "=== libsandbox candidates ==="
+          for p in /usr/lib/libsandbox.1.dylib \
+                   /usr/lib/system/libsandbox.1.dylib \
+                   /System/Library/PrivateFrameworks/Sandbox.framework/Sandbox ; do
+            [ -f "$p" ] && { echo "FOUND $p"; ls -la "$p"; cp "$p" out/ 2>/dev/null; }
+          done
+          echo
+          echo "=== /System/Library/Sandbox ==="
+          ls -la /System/Library/Sandbox/ 2>/dev/null | head -20
+          echo
+          echo "=== Sandbox/Profiles ==="
+          ls -la /System/Library/Sandbox/Profiles/ 2>/dev/null | head -40
+          if [ -d /System/Library/Sandbox/Profiles ]; then
+            cp -R /System/Library/Sandbox/Profiles out/Profiles 2>/dev/null
+            echo "copied Profiles: $(ls out/Profiles 2>/dev/null | wc -l) files"
+          fi
+
+      - name: extract sbpl source from libsandbox
+        run: |
+          set +e
+          for f in out/libsandbox.1.dylib; do
+            [ -f "$f" ] || continue
+            echo "=== $f ==="
+            ls -la "$f"
+            # 提取所有可打印字符串到文件
+            strings -a "$f" > out/strings_libsandbox.txt
+            wc -l out/strings_libsandbox.txt
+            echo "--- sbpl keywords ---"
+            grep -cE '^\(define|^\(lambda|^\(cond|require-|entitlement-|extension ' out/strings_libsandbox.txt
+            echo "--- first sbpl-ish lines ---"
+            grep -nE '\(define|\(lambda|\(cond|require-|entitlement-|extension ' out/strings_libsandbox.txt | head -30
+          done
+
+      - name: dump profile list
+        run: |
+          set +e
+          if [ -d out/Profiles ]; then
+            ls out/Profiles > out/profile_names.txt
+            echo "=== profile count ==="
+            wc -l out/profile_names.txt
+            echo "=== sandbox-related profiles ==="
+            grep -iE 'sandbox|tcc|container|font|quicklook|image' out/profile_names.txt | head -30
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbpl
+          path: out
+          if-no-files-found: warn
