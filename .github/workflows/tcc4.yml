@@ -1,0 +1,71 @@
+name: tcc4
+on:
+  push:
+    paths: ['.github/workflows/tcc4.yml']
+  workflow_dispatch:
+jobs:
+  tcc4:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - name: os version
+        run: sw_vers
+
+      - name: analyze screencapture usage of responsibility entitlement
+        run: |
+          set +e
+          mkdir -p out
+          B=/usr/sbin/screencapture
+          {
+            echo "=== strings mentioning tcc / responsib / entitlement ==="
+            strings -a "$B" | grep -iE 'tcc|responsib|entitlement|screenrecord|screen.?capture' | sort -u | head -40
+            echo
+            echo "=== does it call TCC APIs? (undefined symbols) ==="
+            nm -u "$B" 2>/dev/null | grep -iE 'tcc|responsib|SecTask|audit' 
+            echo
+            echo "=== all undefined symbols count ==="
+            nm -u "$B" 2>/dev/null | wc -l
+            echo
+            echo "=== does it link ScreenCaptureKit / TCC framework? ==="
+            otool -L "$B" 2>/dev/null | grep -iE 'TCC|ScreenCapture|SkyLight'
+          } > out/sc_analysis.txt 2>&1
+          cat out/sc_analysis.txt
+
+      - name: check who can invoke screencapture
+        run: |
+          set +e
+          {
+            echo "=== permissions ==="
+            ls -la /usr/sbin/screencapture
+            stat -f '%Sp %Su:%Sg' /usr/sbin/screencapture
+            echo
+            echo "=== setuid? ==="
+            find /usr/sbin/screencapture -perm -4000 2>/dev/null && echo "SETUID" || echo "not setuid"
+            echo
+            echo "=== can a normal user run it? (dry, just check -h) ==="
+            /usr/sbin/screencapture -h 2>&1 | head -20
+          } > out/sc_perm.txt 2>&1
+          cat out/sc_perm.txt
+
+      - name: check TCC db schema and screen recording service
+        run: |
+          set +e
+          {
+            echo "=== TCC services mentioning screen ==="
+            strings -a /System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC 2>/dev/null | grep -iE 'kTCCService.*Screen|ScreenCapture' | sort -u | head -10
+            echo
+            echo "=== user TCC.db readable? ==="
+            ls -la ~/Library/Application\ Support/com.apple.TCC/TCC.db 2>&1
+            echo
+            echo "=== current TCC entries for screen recording (may be empty) ==="
+            sqlite3 ~/Library/Application\ Support/com.apple.TCC/TCC.db \
+              "select service, client, auth_value from access where service like '%Screen%'" 2>&1 | head -10
+          } > out/tcc_db.txt 2>&1
+          cat out/tcc_db.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tcc4
+          path: out
+          if-no-files-found: warn
