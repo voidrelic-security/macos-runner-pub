@@ -1,0 +1,52 @@
+name: tccent2
+on:
+  push:
+    paths:
+      - '.github/workflows/tccent2.yml'
+  workflow_dispatch:
+jobs:
+  tccent2:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: os version
+        run: sw_vers
+
+      - name: scan for responsibility / tcc-manager entitlements
+        run: |
+          set +e
+          mkdir -p out
+          OUT=out/hits.txt
+          : > $OUT
+          PAT='check-allow-on-responsible-process|tcc\.manager\.set-responsible|responsibility\.set-arbitrary|private\.tcc\.manager|private\.tcc\.allow|storage\.TCC|storage\.SystemTCC|system-tccd-forwarder'
+
+          for d in /usr/libexec /usr/sbin /usr/bin /System/Library/CoreServices /System/Library/PrivateFrameworks /System/Library/Frameworks /System/Library/ExtensionKit/Extensions; do
+            [ -d "$d" ] || continue
+            find "$d" -type f -perm -111 -size -20M 2>/dev/null | head -4000 | while read f; do
+              E=$(codesign -d --entitlements - "$f" 2>&1)
+              [ -z "$E" ] && continue
+              M=$(echo "$E" | grep -E '\[Key\]' | sed 's/.*\[Key\] //' | grep -E "$PAT" | sort -u)
+              if [ -n "$M" ]; then
+                echo "### $f" >> $OUT
+                echo "$M" | sed 's/^/    /' >> $OUT
+              fi
+            done
+          done
+          echo "=== total blocks ==="
+          grep -c '^###' $OUT
+          echo "=== which entitlements appear, with counts ==="
+          grep '^    ' $OUT | sed 's/^ *//' | sort | uniq -c | sort -rn
+
+      - name: who holds set-arbitrary specifically
+        run: |
+          set +e
+          echo "=== holders of com.apple.private.responsibility.set-arbitrary ===" > out/arbitrary.txt
+          awk '/^### /{p=$0} /responsibility\.set-arbitrary/{print p}' out/hits.txt >> out/arbitrary.txt
+          cat out/arbitrary.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tccent2
+          path: out
+          if-no-files-found: warn
